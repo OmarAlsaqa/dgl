@@ -514,7 +514,7 @@ template <DGLDeviceType XPU, typename IdType, typename FloatType>
 std::pair<COOMatrix, FloatArray> CSRLaborSampling(
     CSRMatrix mat, IdArray rows_arr, const int64_t num_picks,
     FloatArray prob_arr, const int importance_sampling, IdArray random_seed_arr,
-    float seed2_contribution, IdArray NIDs) {
+    float seed2_contribution, IdArray NIDs, const bool use_ladies) {
   const bool weighted = !IsNullArray(prob_arr);
 
   const auto& ctx = rows_arr->ctx;
@@ -818,16 +818,16 @@ std::pair<COOMatrix, FloatArray> CSRLaborSampling(
 
 template std::pair<COOMatrix, FloatArray>
 CSRLaborSampling<kDGLCUDA, int32_t, float>(
-    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray);
+    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray, bool);
 template std::pair<COOMatrix, FloatArray>
 CSRLaborSampling<kDGLCUDA, int64_t, float>(
-    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray);
+    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray, bool);
 template std::pair<COOMatrix, FloatArray>
 CSRLaborSampling<kDGLCUDA, int32_t, double>(
-    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray);
+    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray, bool);
 template std::pair<COOMatrix, FloatArray>
 CSRLaborSampling<kDGLCUDA, int64_t, double>(
-    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray);
+    CSRMatrix, IdArray, int64_t, FloatArray, int, IdArray, float, IdArray, bool);
 
 }  // namespace impl
 }  // namespace aten

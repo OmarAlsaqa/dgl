@@ -478,7 +478,7 @@ std::pair<COOMatrix, FloatArray> COOLaborSampling(
     COOMatrix mat, IdArray rows, int64_t num_samples,
     FloatArray prob = NullArray(), int importance_sampling = 0,
     IdArray random_seed = NullArray(), float seed2_contribution = 0,
-    IdArray NIDs = NullArray());
+    IdArray NIDs = NullArray(), bool use_ladies = false);
 
 /**
  * @brief Randomly select a fixed number of non-zero entries along each given

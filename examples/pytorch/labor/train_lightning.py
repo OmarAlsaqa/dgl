@@ -38,6 +38,8 @@ from pytorch_lightning import LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
+import tensorboard_reducer as tbr
+
 from torchmetrics.classification import MulticlassF1Score, MultilabelF1Score
 
 
@@ -218,6 +220,7 @@ class DataModule(LightningDataModule):
         layer_dependency=False,
         batch_dependency=1,
         cache_size=0,
+        use_ladies=False,
     ):
         super().__init__()
 
@@ -256,6 +259,7 @@ class DataModule(LightningDataModule):
                 prefetch_node_feats=["features"],
                 prefetch_edge_feats=["etype"] if "etype" in g.edata else [],
                 prefetch_labels=["labels"],
+                use_ladies=use_ladies,
             )
 
         dataloader_device = th.device("cpu")
@@ -422,6 +426,11 @@ if __name__ == "__main__":
     argparser.add_argument("--early-stopping-patience", type=int, default=10)
     argparser.add_argument("--disable-checkpoint", action="store_true")
     argparser.add_argument("--precision", type=str, default="highest")
+    argparser.add_argument("--use-ladies", action="store_true",
+                           help="Whether to initialize LABOR \pi "
+                           "with 1 or with ladies calculated weights "
+                           "if added to the args")
+    argparser.add_argument("--k-runs", type=int, default=1)
     args = argparser.parse_args()
 
     if args.precision != "highest":
@@ -432,96 +441,129 @@ if __name__ == "__main__":
     else:
         device = th.device("cpu")
 
-    datamodule = DataModule(
-        args.dataset,
-        args.undirected,
-        args.data_cpu,
-        args.use_uva,
-        [int(_) for _ in args.fan_out.split(",")],
-        [int(_) for _ in args.lad_out.split(",")],
-        device,
-        args.batch_size,
-        args.num_workers,
-        args.sampler,
-        args.importance_sampling,
-        args.layer_dependency,
-        args.batch_dependency,
-        args.cache_size,
-    )
-    model = SAGELightning(
-        datamodule.in_feats,
-        args.num_hidden,
-        datamodule.n_classes,
-        args.num_layers,
-        F.relu,
-        args.dropout,
-        args.lr,
-        datamodule.multilabel,
-    )
-
-    # Train
-    callbacks = []
-    if not args.disable_checkpoint:
-        callbacks.append(
-            ModelCheckpoint(monitor="val_acc", save_top_k=1, mode="max")
-        )
-    callbacks.append(BatchSizeCallback(args.vertex_limit))
-    callbacks.append(
-        EarlyStopping(
-            monitor="val_acc",
-            stopping_threshold=args.val_acc_target,
-            mode="max",
-            patience=args.early_stopping_patience,
-        )
-    )
-    subdir = "{}_{}_{}_{}_{}".format(
-        args.dataset,
-        args.sampler,
-        args.importance_sampling,
-        args.layer_dependency,
-        args.batch_dependency,
-    )
-    logger = TensorBoardLogger(args.logdir, name=subdir)
-    trainer = Trainer(
-        accelerator="gpu" if args.gpu != -1 else "cpu",
-        devices=[args.gpu] if args.gpu != -1 else "auto",
-        max_epochs=args.num_epochs,
-        max_steps=args.num_steps,
-        min_steps=args.min_steps,
-        callbacks=callbacks,
-        logger=logger,
-    )
-    trainer.fit(model, datamodule=datamodule)
-
-    # Test
-    if not args.disable_checkpoint:
-        logdir = os.path.join(args.logdir, subdir)
-        dirs = glob.glob("./{}/*".format(logdir))
-        version = max([int(os.path.split(x)[-1].split("_")[-1]) for x in dirs])
-        logdir = "./{}/version_{}".format(logdir, version)
-        print("Evaluating model in", logdir)
-        ckpt = glob.glob(os.path.join(logdir, "checkpoints", "*"))[0]
-
-        model = SAGELightning.load_from_checkpoint(
-            checkpoint_path=ckpt,
-            hparams_file=os.path.join(logdir, "hparams.yaml"),
-        ).to(device)
-    with th.no_grad():
-        graph = datamodule.g
-        pred = model.module.inference(
-            graph,
-            f"cuda:{args.gpu}" if args.gpu != -1 else "cpu",
-            4096,
+    for run in range(args.k_runs):
+        print('='*20 + f'run_{run+1}' + '='*20)
+        datamodule = DataModule(
+            args.dataset,
+            args.undirected,
+            args.data_cpu,
             args.use_uva,
+            [int(_) for _ in args.fan_out.split(",")],
+            [int(_) for _ in args.lad_out.split(",")],
+            device,
+            args.batch_size,
             args.num_workers,
+            args.sampler,
+            args.importance_sampling,
+            args.layer_dependency,
+            args.batch_dependency,
+            args.cache_size,
+            args.use_ladies,
         )
-        for nid, split_name in zip(
-            [datamodule.train_nid, datamodule.val_nid, datamodule.test_nid],
-            ["Train", "Validation", "Test"],
-        ):
-            nid = nid.to(pred.device).long()
-            pred_nid = pred[nid]
-            label = graph.ndata["labels"][nid]
-            f1score = model.f1score_class().to(pred.device)
-            acc = f1score(pred_nid, label)
-            print(f"{split_name} accuracy: {acc.item()}")
+        model = SAGELightning(
+            datamodule.in_feats,
+            args.num_hidden,
+            datamodule.n_classes,
+            args.num_layers,
+            F.relu,
+            args.dropout,
+            args.lr,
+            datamodule.multilabel,
+        )
+
+        # Train
+        callbacks = []
+        if not args.disable_checkpoint:
+            callbacks.append(
+                ModelCheckpoint(monitor="val_acc", save_top_k=1, mode="max")
+            )
+        callbacks.append(BatchSizeCallback(args.vertex_limit))
+        callbacks.append(
+            EarlyStopping(
+                monitor="val_acc",
+                stopping_threshold=args.val_acc_target,
+                mode="max",
+                patience=args.early_stopping_patience,
+            )
+        )
+        subdir = "{}_{}_{}_{}_{}_{}_{}".format(
+            args.dataset,
+            args.sampler,
+            args.importance_sampling,
+            args.layer_dependency,
+            args.batch_dependency,
+            args.use_ladies,
+            args.k_runs,
+        )
+        logger = TensorBoardLogger(args.logdir, name=subdir)
+        trainer = Trainer(
+            accelerator="gpu" if args.gpu != -1 else "cpu",
+            devices=[args.gpu] if args.gpu != -1 else "auto",
+            max_epochs=args.num_epochs,
+            max_steps=args.num_steps,
+            min_steps=args.min_steps,
+            callbacks=callbacks,
+            logger=logger,
+        )
+        trainer.fit(model, datamodule=datamodule)
+
+        # Test
+        if not args.disable_checkpoint:
+            logdir = os.path.join(args.logdir, subdir)
+            dirs = glob.glob("./{}/*".format(logdir))
+            version = max([int(os.path.split(x)[-1].split("_")[-1]) for x in dirs])
+            logdir = "./{}/version_{}".format(logdir, version)
+            print("Evaluating model in", logdir)
+            ckpt = glob.glob(os.path.join(logdir, "checkpoints", "*"))[0]
+
+            model = SAGELightning.load_from_checkpoint(
+                checkpoint_path=ckpt,
+                hparams_file=os.path.join(logdir, "hparams.yaml"),
+            ).to(device)
+        with th.no_grad():
+            graph = datamodule.g
+            pred = model.module.inference(
+                graph,
+                f"cuda:{args.gpu}" if args.gpu != -1 else "cpu",
+                4096,
+                args.use_uva,
+                args.num_workers,
+            )
+            for nid, split_name in zip(
+                [datamodule.train_nid, datamodule.val_nid, datamodule.test_nid],
+                ["Train", "Validation", "Test"],
+            ):
+                nid = nid.to(pred.device).long()
+                pred_nid = pred[nid]
+                label = graph.ndata["labels"][nid]
+                f1score = model.f1score_class().to(pred.device)
+                acc = f1score(pred_nid, label)
+                print(f"{split_name} accuracy: {acc.item()}")
+    
+    if args.k_runs > 1:
+        # print how many tb logs are there to get the mean, max, min, std on.
+        input_event_dirs = sorted(glob.glob(f"{os.path.join(args.logdir, subdir)}/*"))
+        print(f"Found {len(input_event_dirs)}")
+
+        events_out_dir = f"{args.logdir}_reduced/{subdir}_{len(input_event_dirs)}"
+        csv_out_path = f"{args.logdir}_reduced/{subdir}_{len(input_event_dirs)}.csv"
+        overwrite = True
+        reduce_ops = ("mean",)
+
+        events_dict = tbr.load_tb_events(
+            input_event_dirs,
+            verbose=True,
+            handle_dup_steps='mean',
+            strict_steps=False,
+            min_runs_per_step=args.k_runs//2,
+        )
+        
+        reduced_events = tbr.reduce_events(events_dict, reduce_ops, verbose=True)
+
+        for op in reduce_ops:
+            print(f"Writing '{op}' reduction to '{events_out_dir}-{op}'")
+
+        tbr.write_tb_events(reduced_events, events_out_dir, overwrite, verbose=True)
+        print(f"Writing results to '{csv_out_path}'")
+        tbr.write_data_file(reduced_events, csv_out_path, overwrite, verbose=True)
+        print("✓ Reduction complete")

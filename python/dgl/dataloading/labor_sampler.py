@@ -150,6 +150,7 @@ class LaborSampler(BlockSampler):
         prefetch_labels=None,
         prefetch_edge_feats=None,
         output_device=None,
+        use_ladies=False,
     ):
         super().__init__(
             prefetch_node_feats=prefetch_node_feats,
@@ -169,6 +170,7 @@ class LaborSampler(BlockSampler):
             2 if self.cnt[1] > 1 else 1, F.int64, F.cpu()
         )
         self.set_seed(None if batch_dependency > 0 else choice(1e18, 1).item())
+        self.use_ladies = use_ladies
 
     def set_seed(self, random_seed=None):
         """Updates the underlying seed for the sampler
@@ -236,6 +238,7 @@ class LaborSampler(BlockSampler):
                 seed2_contribution=seed2_contr,
                 output_device=self.output_device,
                 exclude_edges=exclude_eids,
+                use_ladies=self.use_ladies,
             )
             eid = frontier.edata[EID]
             block = to_block(

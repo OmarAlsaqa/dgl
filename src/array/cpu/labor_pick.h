@@ -53,7 +53,7 @@ auto compute_importance_sampling_probabilities(
     const IdxType num_rows, const int importance_sampling, const bool weighted,
     const IdxType* rows_data, const IdxType* indptr, const FloatType* A,
     const IdxType* indices, const IdxType num_picks, const FloatType* ds,
-    FloatType* cs) {
+    FloatType* cs, const bool use_ladies) {
   constexpr FloatType ONE = 1;
   // ps stands for \pi in arXiv:2210.13339
   FloatArray ps_array = NDArray::Empty({max_degree + 1}, dtype, ctx);
@@ -62,6 +62,19 @@ auto compute_importance_sampling_probabilities(
   double prev_ex_nodes = max_degree * num_rows;
 
   phmap::flat_hash_map<IdxType, FloatType> hop_map, hop_map2;
+
+  if (use_ladies) {
+    for (int64_t i = 0; i < num_rows; i++) {
+      const IdxType rid = rows_data[i];
+      const auto act_degree = indptr[rid + 1] - indptr[rid];
+      for (auto j = indptr[rid]; j < indptr[rid + 1]; j++) {
+        const IdxType cid = indices[j];
+        hop_map[cid] += weighted ? A[j]*A[j] : 1.0 / act_degree;
+      }
+    }
+  }
+  // for (auto& it : hop_map) it.second = std::sqrt(it.second);
+
   for (int iters = 0; iters < importance_sampling || importance_sampling < 0;
        iters++) {
     // NOTE(mfbalin) When the graph is unweighted, the first c values in
@@ -160,7 +173,7 @@ template <typename IdxType, typename FloatType>
 std::pair<COOMatrix, FloatArray> CSRLaborPick(
     CSRMatrix mat, IdArray rows, int64_t num_picks, FloatArray prob,
     int importance_sampling, IdArray random_seed_arr, float seed2_contribution,
-    IdArray NIDs) {
+    IdArray NIDs, const bool use_ladies) {
   using namespace aten;
   const IdxType* indptr = mat.indptr.Ptr<IdxType>();
   const IdxType* indices = mat.indices.Ptr<IdxType>();
@@ -208,7 +221,7 @@ std::pair<COOMatrix, FloatArray> CSRLaborPick(
   if (importance_sampling)
     hop_map = compute_importance_sampling_probabilities<IdxType, FloatType>(
         ctx, dtype, max_degree, num_rows, importance_sampling, weighted,
-        rows_data, indptr, A, indices, (IdxType)num_picks, ds, cs);
+        rows_data, indptr, A, indices, (IdxType)num_picks, ds, cs, use_ladies);
 
   constexpr auto vidtype = DGLDataTypeTraits<IdxType>::dtype;
 
@@ -285,14 +298,14 @@ template <typename IdxType, typename FloatType>
 std::pair<COOMatrix, FloatArray> COOLaborPick(
     COOMatrix mat, IdArray rows, int64_t num_picks, FloatArray prob,
     int importance_sampling, IdArray random_seed, float seed2_contribution,
-    IdArray NIDs) {
+    IdArray NIDs, const bool use_ladies) {
   using namespace aten;
   const auto& csr = COOToCSR(COOSliceRows(mat, rows));
   const IdArray new_rows =
       Range(0, rows->shape[0], rows->dtype.bits, rows->ctx);
   const auto&& picked_importances = CSRLaborPick<IdxType, FloatType>(
       csr, new_rows, num_picks, prob, importance_sampling, random_seed,
-      seed2_contribution, NIDs);
+      seed2_contribution, NIDs, use_ladies);
   const auto& picked = picked_importances.first;
   const auto& importances = picked_importances.second;
   return std::make_pair(

@@ -42,6 +42,7 @@ def sample_labors(
     copy_edata=True,
     exclude_edges=None,
     output_device=None,
+    use_ladies=False,
 ):
     """Sampler that builds computational dependency of node representations via
     labor sampling for multilayer GNN from the NeurIPS 2023 paper
@@ -215,6 +216,7 @@ def sample_labors(
             copy_ndata=copy_ndata,
             copy_edata=copy_edata,
             exclude_edges=exclude_edges,
+            use_ladies=use_ladies,
         )
     else:
         frontier, importances = _sample_labors(
@@ -228,6 +230,7 @@ def sample_labors(
             seed2_contribution=seed2_contribution,
             copy_ndata=copy_ndata,
             copy_edata=copy_edata,
+            use_ladies=use_ladies,
         )
         if exclude_edges is not None:
             eid_excluder = EidExcluder(exclude_edges)
@@ -253,6 +256,7 @@ def _sample_labors(
     copy_ndata=True,
     copy_edata=True,
     exclude_edges=None,
+    use_ladies=False,
 ):
     if random_seed is None:
         random_seed = F.to_dgl_nd(choice(1e18, 1))
@@ -339,6 +343,7 @@ def _sample_labors(
         random_seed,
         seed2_contribution,
         nids_all_types,
+        use_ladies,
     )
     subgidx = ret_val[0]
     importances = [F.from_dgl_nd(importance) for importance in ret_val[1:]]
